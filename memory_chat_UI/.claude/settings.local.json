@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(netstat -ano)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell:*)",
+      "Bash(find C:\\\\Learning\\\\AI Projects\\\\Claude Learning Project\\\\memory_chat_ui:*)",
+      "Bash(ollama list:*)",
+      "Bash(python -c \"from chatapi.memory_chatbot import chat; print\\(chat\\('hello'\\)\\)\")",
+      "Bash(python -c ':*)"
+    ]
+  }
+}
