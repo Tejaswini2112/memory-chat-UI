@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import requests
 from dotenv import load_dotenv
 
@@ -89,12 +90,88 @@ User message: "{user_message}"
         return None
 
 
-def build_memory_context(session_id: str) -> str:
-    """Format saved facts into a block for the system prompt."""
+def search_memories(query: str, facts: list[str], top_k: int = 5) -> list[str]:
+    """Score each fact against the query using TF-IDF-style keyword overlap and
+    return the top_k most relevant facts.
+
+    How the scoring works:
+    1. Tokenize the query and every fact into lowercase words (letters/digits only).
+    2. Build a document-frequency (DF) table: for each word, how many facts contain it.
+    3. For every fact, compute a relevance score against the query:
+       - For each query word that appears in the fact, add its IDF weight.
+       - IDF = log(N / DF) where N = total number of facts.  Rare words score higher
+         than common ones, so "piano" beats "the" when matching "I play piano".
+    4. Sort facts by descending score and return the top_k.
+    5. If every fact scored 0 (no keyword overlap at all), fall back to the most
+       recent 5 facts by list index so the bot still has some context.
+    """
+    if not facts:
+        return []
+
+    # --- tokenizer: split on non-alphanumeric chars, lowercase ---
+    def _tokenize(text: str) -> set[str]:
+        tokens: set[str] = set()
+        word = []
+        for ch in text.lower():
+            if ch.isalnum():
+                word.append(ch)
+            else:
+                if word:
+                    tokens.add("".join(word))
+                    word = []
+        if word:
+            tokens.add("".join(word))
+        return tokens
+
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        # No usable words in the query — return the most recent facts
+        return facts[-top_k:]
+
+    # Tokenize every fact once
+    fact_tokens = [_tokenize(f) for f in facts]
+
+    # --- Document frequency: how many facts contain each word ---
+    n = len(facts)
+    df: dict[str, int] = {}
+    for tokens in fact_tokens:
+        for word in tokens:
+            df[word] = df.get(word, 0) + 1
+
+    # --- Score each fact against the query using IDF-weighted overlap ---
+    # score(fact) = sum of idf(w) for every query word w that appears in fact
+    # idf(w) = log(N / df(w))  — words in fewer facts get a higher weight
+    scores: list[float] = []
+    for tokens in fact_tokens:
+        score = 0.0
+        for qw in query_tokens:
+            if qw in tokens and qw in df:
+                score += math.log(n / df[qw])
+        scores.append(score)
+
+    # --- Pick the top_k highest-scoring facts ---
+    indexed = sorted(enumerate(scores), key=lambda pair: pair[1], reverse=True)
+    top = [facts[i] for i, s in indexed[:top_k] if s > 0]
+
+    # Fallback: if nothing matched at all, return the last top_k facts (most recent)
+    if not top:
+        return facts[-top_k:]
+
+    return top
+
+
+def build_memory_context(session_id: str, user_message: str = "") -> str:
+    """Format the most relevant saved facts into a block for the system prompt.
+
+    Uses search_memories() to pick only the facts that match the current query
+    instead of dumping every fact into the prompt.
+    """
     facts = memory_store.get(session_id, [])
     if not facts:
         return ""
-    facts_text = "\n".join(f"- {fact}" for fact in facts)
+    # Retrieve the most relevant facts for this particular message
+    relevant = search_memories(user_message, facts) if user_message else facts[-5:]
+    facts_text = "\n".join(f"- {fact}" for fact in relevant)
     return f"\n\nHere are important things you remember about this user:\n{facts_text}\n\nUse these facts naturally in conversation when relevant."
 
 
@@ -109,8 +186,8 @@ def chat(session_id: str, user_message: str) -> dict:
     history = sessions[session_id]
     history.append({"role": "user", "content": user_message})
 
-    # Build system prompt with memory context
-    memory_context = build_memory_context(session_id)
+    # Build system prompt with only the most relevant memories for this message
+    memory_context = build_memory_context(session_id, user_message)
     system_prompt = SYSTEM_PROMPT + memory_context
 
     messages = [{"role": "system", "content": system_prompt}] + history
