@@ -32,14 +32,6 @@ const initialMessages: Message[] = [
 
 const initialMemories: Memory[] = []
 
-const botResponses = [
-  "I've noted that! I'll remember this for future conversations.",
-  "That's interesting! I'll keep that in mind.",
-  "Got it! This information has been stored in my memory.",
-  "Thanks for sharing! I've added this to what I know about you.",
-  "I understand. I'll remember this detail about you.",
-]
-
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [memories, setMemories] = useState<Memory[]>(initialMemories)
@@ -82,9 +74,9 @@ export function ChatInterface() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: content }),
       })
-      
+
       const data = await response.json()
-      
+
       if (!response.ok) {
         throw new Error(data.detail || "Failed to fetch response")
       }
@@ -97,13 +89,14 @@ export function ChatInterface() {
       }
       setMessages((prev) => [...prev, botResponse])
 
-      // Store a simple memory based on user input length for the sidebar
-      if (content.length > 10) {
-        const newMemory: Memory = {
-          id: Date.now().toString(),
-          fact: `${content.slice(0, 40)}${content.length > 40 ? '...' : ''}`,
-        }
-        setMemories((prev) => [...prev, newMemory])
+      // Update memories from backend smart memory
+      if (data.memory && data.memory.length > 0) {
+        setMemories(
+          data.memory.map((fact: string, idx: number) => ({
+            id: idx.toString(),
+            fact,
+          }))
+        )
       }
     } catch (error) {
       console.error("Chat error:", error)
@@ -121,7 +114,7 @@ export function ChatInterface() {
 
   const handleClearMemory = async () => {
     try {
-      await fetch("http://localhost:8000/api/clear", { method: "POST" })
+      await fetch("http://localhost:8000/api/clear/default", { method: "DELETE" })
       setMemories([])
     } catch (error) {
       console.error("Failed to clear memory:", error)
